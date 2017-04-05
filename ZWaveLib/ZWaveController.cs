@@ -307,7 +307,7 @@ namespace ZWaveLib
         /// <param name="message">Message.</param>
         public bool SendMessage(ZWaveMessage message)
         {
-            #region Debug
+            #region Debug 
             Utility.logger.Trace("[[[ BEGIN REQUEST ]]]");
             var stopWatch = new Stopwatch();
             stopWatch.Start();
@@ -334,7 +334,7 @@ namespace ZWaveLib
                 Utility.logger.Warn("Controller status error (Node={0}, CallbackId={0}, Function={1}, CommandClass={2})", pendingRequest.NodeId, pendingRequest.CallbackId.ToString("X2"), pendingRequest.Function, pendingRequest.CommandClass);
             }
             pendingRequest = null;
-            #region Debug
+            #region Debug 
             stopWatch.Stop();
             Utility.logger.Trace("[[[ END REQUEST ]]] took {0} ms", stopWatch.ElapsedMilliseconds);
             #endregion
@@ -705,13 +705,18 @@ namespace ZWaveLib
         public ZWaveMessage StopNodeRemove()
         {
             Utility.logger.Trace("BEGIN");
+
             byte[] header = new byte[] {
                 (byte)FrameHeader.SOF, /* Start Of Frame */
                 0x05 /*packet len */,
                 (byte)MessageType.Request, /* Type of message */
                 (byte)ZWaveFunction.NodeRemove
             };
-            byte[] footer = new byte[] { (byte)NodeFunctionOption.RemoveNodeStop, 0x00, 0x00 };
+            // byte[] footer = new byte[] { (byte)NodeFunctionOption.RemoveNodeStop, 0x00, 0x00 };
+
+            /*                  WORKAROUND                */
+            // remove an invalid node will change zwave bridge state to "Remove node failed"
+            byte[] footer = new byte[] { (byte)NodeFunctionOption.RemoveNodeSlave, 0x00, 0x00 };
             byte[] message = new byte[header.Length + footer.Length];
 
             System.Array.Copy(header, 0, message, 0, header.Length);
@@ -855,33 +860,41 @@ namespace ZWaveLib
             }
 
             var rawData = msg.RawData;
+            Utility.logger.Trace($"============> ZWave Msg Recd: with type {msg.Type} and function {msg.Function} and callback status {msg.CallbackStatus} from command class {msg.CommandClass}");
             switch (msg.Type)
             {
+                case MessageType.Request:
 
-            case MessageType.Request:
-
-                switch (msg.Function)
-                {
-
-                case ZWaveFunction.NotSet:
-                    break;
-
-                case ZWaveFunction.NodeAdd:
-
-                    var nodeAddStatus = NodeAddStatus.None;
-                    Enum.TryParse(rawData[5].ToString(), out nodeAddStatus);
-                    switch (nodeAddStatus)
+                    switch (msg.Function)
                     {
 
-                    case NodeAddStatus.LearnReady:
+                        case ZWaveFunction.NotSet:
+                            break;
 
-                        UpdateOperationProgress(0x01, NodeQueryStatus.NodeAddReady);
-                        SetQueryStage(QueryStage.Complete);
-                        break;
+                        case ZWaveFunction.NodeAdd:
 
-                    case NodeAddStatus.AddingSlave:
+                            var nodeAddStatus = NodeAddStatus.None;
+                            Enum.TryParse(rawData[5].ToString(), out nodeAddStatus);
+                            try
+                            {
+                                Utility.logger.Trace($"============> ZWave Msg Recd: Node {rawData[6]} is at status {nodeAddStatus}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Utility.logger.Error(ex, ex.Message);
+                            }
+                            switch (nodeAddStatus)
+                            {
 
-                        var newNode = CreateNode(rawData[6], 0x00);
+                                case NodeAddStatus.LearnReady:
+
+                                    UpdateOperationProgress(0x01, NodeQueryStatus.NodeAddReady);
+                                    SetQueryStage(QueryStage.Complete);
+                                    break;
+
+                                case NodeAddStatus.AddingSlave:
+
+                                    var newNode = CreateNode(rawData[6], 0x00);
                         var existingNode = nodeList.Find((n) => n.Id == newNode.Id);
                         if (existingNode == null)
                         {
@@ -903,289 +916,297 @@ namespace ZWaveLib
                             newNode = existingNode;
                         }
 
-                        UpdateOperationProgress(newNode.Id, NodeQueryStatus.NodeAddStarted);
+                                    UpdateOperationProgress(newNode.Id, NodeQueryStatus.NodeAddStarted);
 
-                        if (newNode.SupportCommandClass(CommandClass.Security))
-                        {
-                            var nodeSecurityData = Security.GetSecurityData(newNode);
-                            nodeSecurityData.IsAddingNode = true;
+                                    if (newNode.SupportCommandClass(CommandClass.Security))
+                                    {
+                                        var nodeSecurityData = Security.GetSecurityData(newNode);
+                                        nodeSecurityData.IsAddingNode = true;
 
-                            Security.GetScheme(newNode);
-                        }
-                        else
-                        {
-                            NodeInformationFrameDone(newNode);
-                        }
-                        break;
+                                        Security.GetScheme(newNode);
+                                    }
+                                    else
+                                    {
+                                        NodeInformationFrameDone(newNode);
+                                    }
+                                    break;
 
-                    case NodeAddStatus.ProtocolDone:
+                                case NodeAddStatus.ProtocolDone:
 
-                        GetNodeProtocolInfo(rawData[6]);
-                        var addedNode = GetNode(rawData[6]);
-                        if (addedNode != null)
-                        {
-                            ManufacturerSpecific.Get(addedNode);
-                            CommandClasses.Version.Report(addedNode);
-                            UpdateOperationProgress(addedNode.Id, NodeQueryStatus.NodeAddDone);
-                        }
-                        else
-                        {
-                            UpdateOperationProgress(rawData[6], NodeQueryStatus.NodeAddFailed);
-                        }
-                        SetQueryStage(QueryStage.Complete);
-                        break;
+                                    GetNodeProtocolInfo(rawData[6]);
+                                    var addedNode = GetNode(rawData[6]);
+                                    if (addedNode != null)
+                                    {
+                                        ManufacturerSpecific.Get(addedNode);
+                                        CommandClasses.Version.Report(addedNode);
+                                        UpdateOperationProgress(addedNode.Id, NodeQueryStatus.NodeAddDone);
+                                    }
+                                    else
+                                    {
+                                        UpdateOperationProgress(rawData[6], NodeQueryStatus.NodeAddFailed);
+                                    }
+                                    SetQueryStage(QueryStage.Complete);
+                                    break;
 
-                    case NodeAddStatus.Done:
+                                case NodeAddStatus.Done:
 
-                        UpdateOperationProgress(0x01, NodeQueryStatus.NodeAddDone);
-                        SetQueryStage(QueryStage.Complete);
-                        break;
+                                    UpdateOperationProgress(0x01, NodeQueryStatus.NodeAddDone);
+                                    SetQueryStage(QueryStage.Complete);
+                                    break;
 
-                    case NodeAddStatus.Failed:
+                                case NodeAddStatus.Failed:
 
-                        UpdateOperationProgress(rawData[6], NodeQueryStatus.NodeAddFailed);
-                        SetQueryStage(QueryStage.Complete);
-                        break;
+                                    UpdateOperationProgress(rawData[6], NodeQueryStatus.NodeAddFailed);
+                                    SetQueryStage(QueryStage.Complete);
+                                    break;
 
-                    }
-                    break;
-
-                case ZWaveFunction.NodeRemove:
-
-                    var nodeRemoveStatus = NodeRemoveStatus.None;
-                    Enum.TryParse(rawData[5].ToString(), out nodeRemoveStatus);
-                    switch (nodeRemoveStatus)
-                    {
-
-                    case NodeRemoveStatus.LearnReady:
-
-                        UpdateOperationProgress(0x01, NodeQueryStatus.NodeRemoveReady);
-                        SetQueryStage(QueryStage.Complete);
-                        break;
-
-                    case NodeRemoveStatus.RemovingSlave:
-
-                        UpdateOperationProgress(rawData[6], NodeQueryStatus.NodeRemoveStarted);
-                        break;
-
-                    case NodeRemoveStatus.Done:
-
-                        if (rawData[6] != 0x00)
-                        {
-                            RemoveNode(rawData[6]);
-                            SaveNodesConfig();
-                        }
-                        UpdateOperationProgress(rawData[6], NodeQueryStatus.NodeRemoveDone);
-                        SetQueryStage(QueryStage.Complete);
-                        break;
-
-                    case NodeRemoveStatus.Failed:
-
-                        UpdateOperationProgress(rawData[6], NodeQueryStatus.NodeRemoveFailed);
-                        SetQueryStage(QueryStage.Complete);
-                        break;
-
-                    }
-                    break;
-
-                case ZWaveFunction.RequestNodeNeighborsUpdateOptions:
-                case ZWaveFunction.RequestNodeNeighborsUpdate:
-
-                    var neighborUpdateStatus = NeighborsUpdateStatus.None;
-                    Enum.TryParse(rawData[5].ToString(), out neighborUpdateStatus);
-                    switch (neighborUpdateStatus)
-                    {
-
-                    case NeighborsUpdateStatus.NeighborsUpdateStarted:
-
-                        UpdateOperationProgress(msg.NodeId, NodeQueryStatus.NeighborUpdateStarted);
-                        break;
-
-                    case NeighborsUpdateStatus.NeighborsUpdateDone:
-
-                        UpdateOperationProgress(msg.NodeId, NodeQueryStatus.NeighborUpdateDone);
-                        SetQueryStage(QueryStage.Complete);
-                        break;
-
-                    case NeighborsUpdateStatus.NeighborsUpdateFailed:
-
-                        UpdateOperationProgress(msg.NodeId, NodeQueryStatus.NeighborUpdateFailed);
-                        SetQueryStage(QueryStage.Complete);
-                        break;
-
-                    default:
-                        Utility.logger.Warn("Unhandled Node Neighbor Update request: {0}", BitConverter.ToString(rawData));
-                        break;
-
-                    }
-                    break;
-
-                case ZWaveFunction.SendData:
-
-                    byte callbackId = rawData[4];
-                    if (callbackId == 0x01) // 0x01 is "SEND DATA OK"
-                    {
-                        // TODO: ... is there anything to be done here?
-                    }
-                    else
-                    {
-                        switch (msg.CallbackStatus)
-                        {
-
-                        case CallbackStatus.Ack:
-                            //System.Diagnostics.Debugger.Break();
+                            }
                             break;
 
-                        case CallbackStatus.Nack:
-                            //System.Diagnostics.Debugger.Break();
+                        case ZWaveFunction.NodeRemove:
+
+                            var nodeRemoveStatus = NodeRemoveStatus.None;
+                            Enum.TryParse(rawData[5].ToString(), out nodeRemoveStatus);
+                            try
+                            {
+                                Utility.logger.Trace($"============> ZWave Msg Recd: Node {rawData[6]} is at status {nodeRemoveStatus}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Utility.logger.Error(ex, ex.Message);
+                            }
+                            switch (nodeRemoveStatus)
+                            {
+
+                                case NodeRemoveStatus.LearnReady:
+
+                                    UpdateOperationProgress(0x01, NodeQueryStatus.NodeRemoveReady);
+                                    SetQueryStage(QueryStage.WaitAck);
+                                    break;
+
+                                case NodeRemoveStatus.RemovingSlave:
+
+                                    UpdateOperationProgress(rawData[6], NodeQueryStatus.NodeRemoveStarted);
+                                    break;
+
+                                case NodeRemoveStatus.Done:
+
+                                    if (rawData[6] != 0x00)
+                                    {
+                                        RemoveNode(rawData[6]);
+                                        SaveNodesConfig();
+                                    }
+                                    UpdateOperationProgress(rawData[6], NodeQueryStatus.NodeRemoveDone);
+                                    SetQueryStage(QueryStage.Complete);
+                                    break;
+
+                                case NodeRemoveStatus.Failed:
+
+                                    UpdateOperationProgress(rawData[6], NodeQueryStatus.NodeRemoveFailed);
+                                    SetQueryStage(QueryStage.Complete);
+                                    break;
+
+                            }
                             break;
 
-                        }
+                        case ZWaveFunction.RequestNodeNeighborsUpdateOptions:
+                        case ZWaveFunction.RequestNodeNeighborsUpdate:
+
+                            var neighborUpdateStatus = NeighborsUpdateStatus.None;
+                            Enum.TryParse(rawData[5].ToString(), out neighborUpdateStatus);
+                            switch (neighborUpdateStatus)
+                            {
+
+                                case NeighborsUpdateStatus.NeighborsUpdateStarted:
+
+                                    UpdateOperationProgress(msg.NodeId, NodeQueryStatus.NeighborUpdateStarted);
+                                    break;
+
+                                case NeighborsUpdateStatus.NeighborsUpdateDone:
+
+                                    UpdateOperationProgress(msg.NodeId, NodeQueryStatus.NeighborUpdateDone);
+                                    SetQueryStage(QueryStage.Complete);
+                                    break;
+
+                                case NeighborsUpdateStatus.NeighborsUpdateFailed:
+
+                                    UpdateOperationProgress(msg.NodeId, NodeQueryStatus.NeighborUpdateFailed);
+                                    SetQueryStage(QueryStage.Complete);
+                                    break;
+
+                                default:
+                                    Utility.logger.Warn("Unhandled Node Neighbor Update request: {0}", BitConverter.ToString(rawData));
+                                    break;
+
+                            }
+                            break;
+
+                        case ZWaveFunction.SendData:
+
+                            byte callbackId = rawData[4];
+                            if (callbackId == 0x01) // 0x01 is "SEND DATA OK"
+                            {
+                                // TODO: ... is there anything to be done here?
+                            }
+                            else
+                            {
+                                switch (msg.CallbackStatus)
+                                {
+
+                                    case CallbackStatus.Ack:
+                                        //System.Diagnostics.Debugger.Break();
+                                        break;
+
+                                    case CallbackStatus.Nack:
+                                        //System.Diagnostics.Debugger.Break();
+                                        break;
+
+                                }
+                            }
+                            break;
+
+                        case ZWaveFunction.ApplicationCommandHandler:
+
+                            var node = GetNode(rawData[5]);
+                            if (node != null)
+                            {
+                                try
+                                {
+                                    node.ApplicationCommandHandler(rawData);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Utility.logger.Error(ex);
+                                }
+                            }
+                            else
+                            {
+                                Utility.logger.Error("Unknown node id {0}", rawData[5]);
+                            }
+                            break;
+
+                        case ZWaveFunction.ApplicationUpdate:
+
+                            // TODO: enable nodeInfoStatus byte check
+                            /*
+                            var applicationUpdateStatus = ApplicationUpdateStatus.None;
+                            Enum.TryParse(rawData[4].ToString(), out nodeInfoStatus);
+
+                            if (applicationUpdateStatus == ApplicationUpdateStatus.RequestNodeInfoSuccessful)
+                            {
+                            */
+                            int nifLength = (int)rawData[6];
+                            var znode = GetNode(rawData[5]);
+                            if (znode != null)
+                            {
+                                // we don't need to exclude the last 2 CommandClasses
+                                byte[] nodeInfo = new byte[nifLength];
+                                Array.Copy(rawData, 7, nodeInfo, 0, nifLength);
+                                znode.NodeInformationFrame = nodeInfo;
+                                if (znode.SupportCommandClass(CommandClass.Security))
+                                {
+                                    // ask the node what security command classes are supported
+                                    Security.GetSupported(znode);
+                                }
+                                else
+                                {
+                                    NodeInformationFrameDone(znode);
+                                    SetQueryStage(QueryStage.Complete);
+                                }
+                                // if node supports WakeUp command class and is sleeping, then wake it up
+                                if (znode.SupportCommandClass(CommandClass.WakeUp))
+                                {
+                                    WakeUp.WakeUpNode(znode);
+                                }
+                            }
+                            else
+                            {
+                                SetQueryStage(QueryStage.Error);
+                            }
+                            break;
+
+                        default:
+                            Utility.logger.Warn("Unhandled request message: {0}", BitConverter.ToString(rawData));
+                            break;
+
                     }
+
                     break;
 
-                case ZWaveFunction.ApplicationCommandHandler:
+                case MessageType.Response:
 
-                    var node = GetNode(rawData[5]);
-                    if (node != null)
+                    switch (msg.Function)
                     {
-                        try
-                        {
-                            node.ApplicationCommandHandler(rawData);
-                        }
-                        catch (Exception ex)
-                        {
-                            Utility.logger.Error(ex);
-                        }
-                    }
-                    else
-                    {
-                        Utility.logger.Error("Unknown node id {0}", rawData[5]);
-                    }
-                    break;
 
-                case ZWaveFunction.ApplicationUpdate:
-
-                    // TODO: enable nodeInfoStatus byte check
-                    /*
-                    var applicationUpdateStatus = ApplicationUpdateStatus.None;
-                    Enum.TryParse(rawData[4].ToString(), out nodeInfoStatus);
-
-                    if (applicationUpdateStatus == ApplicationUpdateStatus.RequestNodeInfoSuccessful)
-                    {
-                    */
-                    int nifLength = (int)rawData[6];
-                    var znode = GetNode(rawData[5]);
-                    if (znode != null)
-                    {
-                        // we don't need to exclude the last 2 CommandClasses
-                        byte[] nodeInfo = new byte[nifLength];
-                        Array.Copy(rawData, 7, nodeInfo, 0, nifLength);
-                        znode.NodeInformationFrame = nodeInfo;
-                        if (znode.SupportCommandClass(CommandClass.Security))
-                        {
-                            // ask the node what security command classes are supported
-                            Security.GetSupported(znode);
-                        }
-                        else
-                        {
-                            NodeInformationFrameDone(znode);
+                        case ZWaveFunction.GetInitData:
+                            InitializeNodes(rawData);
                             SetQueryStage(QueryStage.Complete);
-                        }
-                        // if node supports WakeUp command class and is sleeping, then wake it up
-                        if (znode.SupportCommandClass(CommandClass.WakeUp))
-                        {
-                            WakeUp.WakeUpNode(znode);
-                        }
+                            break;
+
+                        case ZWaveFunction.GetHomeId:
+                            if (rawData.Length > 7)
+                            {
+                                byte[] homeId = new byte[4] { rawData[4], rawData[5], rawData[6], rawData[7] };
+                                byte nodeId = rawData[2]; // <-- perhaps this is rawData[8] ...
+                                Utility.logger.Info("Home Id is {0}, Controller node id is {1}", BitConverter.ToString(homeId), nodeId);
+                                // TODO: complete this code
+                            }
+                            else
+                            {
+                                Utility.logger.Warn("Could not read Home Id.");
+                            }
+                            break;
+
+                        case ZWaveFunction.GetControllerInfo:
+                        case ZWaveFunction.GetControllerCapabilities:
+                        case ZWaveFunction.GetSucNodeId:
+                            // TODO: complete this code
+                            Utility.logger.Warn("Response handling for {0} not implemented yet!", msg.Function);
+                            break;
+
+                        case ZWaveFunction.GetNodeProtocolInfo:
+                            var node = GetNode(msg.NodeId);
+                            node.ProtocolInfo.BasicType = rawData[7];
+                            node.ProtocolInfo.GenericType = rawData[8];
+                            node.ProtocolInfo.SpecificType = rawData[9];
+                            break;
+
+                        case ZWaveFunction.RequestNodeInfo:
+                            SetQueryStage(QueryStage.SendDataReady);
+                            break;
+
+                        case ZWaveFunction.SendData:
+                            // TODO: shall we do something here?
+                            break;
+
+                        case ZWaveFunction.GetRoutingInfo:
+                            var routingInfo = Utility.ExtractRoutingFromBitMask(rawData);
+                            if (routingInfo.Length > 0)
+                            {
+                                var routedNode = GetNode(msg.NodeId);
+                                if (routedNode != null)
+                                {
+                                    routedNode.UpdateData("RoutingInfo", routingInfo);
+                                    routedNode.OnNodeUpdated(new NodeEvent(routedNode, EventParameter.RoutingInfo, String.Join(" ", routingInfo), 0));
+                                }
+                            }
+                            else
+                            {
+                                Utility.logger.Warn("No routing nodes reported.");
+                            }
+                            break;
+
+                        default:
+                            Utility.logger.Warn("Unhandled response message: {0}", BitConverter.ToString(rawData));
+                            break;
+
                     }
-                    else
-                    {
-                        SetQueryStage(QueryStage.Error);
-                    }
+
                     break;
 
                 default:
-                    Utility.logger.Warn("Unhandled request message: {0}", BitConverter.ToString(rawData));
+                    Utility.logger.Warn("Unhandled message type: {0}", BitConverter.ToString(rawData));
                     break;
-
-                }
-
-                break;
-
-            case MessageType.Response:
-
-                switch (msg.Function)
-                {
-
-                case ZWaveFunction.GetInitData:
-                    InitializeNodes(rawData);
-                    SetQueryStage(QueryStage.Complete);
-                    break;
-
-                case ZWaveFunction.GetHomeId:
-                    if (rawData.Length > 7)
-                    {
-                        byte[] homeId = new byte[4] { rawData[4], rawData[5], rawData[6], rawData[7] };
-                        byte nodeId = rawData[2]; // <-- perhaps this is rawData[8] ...
-                        Utility.logger.Info("Home Id is {0}, Controller node id is {1}", BitConverter.ToString(homeId), nodeId);
-                        // TODO: complete this code
-                    }
-                    else
-                    {
-                        Utility.logger.Warn("Could not read Home Id.");
-                    }
-                    break;
-
-                case ZWaveFunction.GetControllerInfo:
-                case ZWaveFunction.GetControllerCapabilities:
-                case ZWaveFunction.GetSucNodeId:
-                    // TODO: complete this code
-                    Utility.logger.Warn("Response handling for {0} not implemented yet!", msg.Function);
-                    break;
-
-                case ZWaveFunction.GetNodeProtocolInfo:
-                    var node = GetNode(msg.NodeId);
-                    node.ProtocolInfo.BasicType = rawData[7];
-                    node.ProtocolInfo.GenericType = rawData[8];
-                    node.ProtocolInfo.SpecificType = rawData[9];
-                    break;
-
-                case ZWaveFunction.RequestNodeInfo:
-                    SetQueryStage(QueryStage.SendDataReady);
-                    break;
-
-                case ZWaveFunction.SendData:
-                    // TODO: shall we do something here?
-                    break;
-
-                case ZWaveFunction.GetRoutingInfo:
-                    var routingInfo = Utility.ExtractRoutingFromBitMask(rawData);
-                    if (routingInfo.Length > 0)
-                    {
-                        var routedNode = GetNode(msg.NodeId);
-                        if (routedNode != null)
-                        {
-                            routedNode.UpdateData("RoutingInfo", routingInfo);
-                            routedNode.OnNodeUpdated(new NodeEvent(routedNode, EventParameter.RoutingInfo, String.Join(" ", routingInfo), 0));
-                        }
-                    }
-                    else
-                    {
-                        Utility.logger.Warn("No routing nodes reported.");
-                    }
-                    break;
-
-                default:
-                    Utility.logger.Warn("Unhandled response message: {0}", BitConverter.ToString(rawData));
-                    break;
-
-                }
-
-                break;
-
-            default:
-                Utility.logger.Warn("Unhandled message type: {0}", BitConverter.ToString(rawData));
-                break;
             }
 
         }
@@ -1214,36 +1235,36 @@ namespace ZWaveLib
                 //Utility.logger.Trace("Query Stage {0} Type {1} Function {2}={3} Node {4}={5} Callback {6}={7}", currentStage, zm.Type, zm.Function, currentMessage.Function, zm.NodeId, currentMessage.NodeId, zm.CallbackId, currentMessage.CallbackId);
                 switch (currentStage)
                 {
-                case QueryStage.WaitAck:
-                    // The controller accepted a request
-                    if (zm.Type == MessageType.Response && zm.Function == pendingRequest.Function)
-                    {
-                        if (pendingRequest.CallbackId == 0)
+                    case QueryStage.WaitAck:
+                        // The controller accepted a request
+                        if (zm.Type == MessageType.Response && zm.Function == pendingRequest.Function)
                         {
-                            SetQueryStage(QueryStage.Complete);
+                            if (pendingRequest.CallbackId == 0)
+                            {
+                                SetQueryStage(QueryStage.Complete);
+                            }
+                            else
+                            {
+                                // The controller needs querying data from the node
+                                SetQueryStage(QueryStage.SendDataReady);
+                            }
                         }
-                        else
+                        break;
+                    case QueryStage.SendDataReady:
+                        // The controller requested data from the node
+                        if (zm.Type == MessageType.Request && zm.Function == pendingRequest.Function)
                         {
-                            // The controller needs querying data from the node
-                            SetQueryStage(QueryStage.SendDataReady);
+                            if (zm.CallbackStatus != CallbackStatus.Ack)
+                            {
+                                SetQueryStage(QueryStage.Error);
+                                // TODO: Dump Diagnostic Statistics
+                            }
+                            else
+                            {
+                                SetQueryStage(QueryStage.Complete);
+                            }
                         }
-                    }
-                    break;
-                case QueryStage.SendDataReady:
-                    // The controller requested data from the node
-                    if (zm.Type == MessageType.Request && zm.Function == pendingRequest.Function)
-                    {
-                        if (zm.CallbackStatus != CallbackStatus.Ack)
-                        {
-                            SetQueryStage(QueryStage.Error);
-                            // TODO: Dump Diagnostic Statistics
-                        }
-                        else
-                        {
-                            SetQueryStage(QueryStage.Complete);
-                        }
-                    }
-                    break;
+                        break;
                 }
             }
         }
@@ -1462,13 +1483,13 @@ namespace ZWaveLib
             ZWaveNode node;
             switch (genericType)
             {
-            case (byte) GenericType.StaticController:
-                // TODO: what should be done here?...
-                node = null;
-                break;
-            default: // generic node
-                node = new ZWaveNode(this, nodeId, genericType);
-                break;
+                case (byte)GenericType.StaticController:
+                    // TODO: what should be done here?...
+                    node = null;
+                    break;
+                default: // generic node
+                    node = new ZWaveNode(this, nodeId, genericType);
+                    break;
             }
             node.NodeUpdated += ZWave_NodeUpdated;
             UpdateOperationProgress(nodeId, NodeQueryStatus.NodeAdded);
