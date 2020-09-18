@@ -881,7 +881,7 @@ namespace ZWaveLib
                             }
                             catch (Exception ex)
                             {
-                                Utility.logger.Error(ex, ex.Message);
+                                Utility.logger.Error(ex.Message);
                             }
                             switch (nodeAddStatus)
                             {
@@ -895,26 +895,26 @@ namespace ZWaveLib
                                 case NodeAddStatus.AddingSlave:
 
                                     var newNode = CreateNode(rawData[6], 0x00);
-                        var existingNode = nodeList.Find((n) => n.Id == newNode.Id);
-                        if (existingNode == null)
-                        {
-                            // Extract node information frame
-                            int nodeInfoLength = (int)rawData[7];
-                            byte[] nodeInfo = new byte[nodeInfoLength];
-                            Array.Copy(rawData, 8, nodeInfo, 0, nodeInfoLength);
-                            // Update node properties
-                            newNode.NodeInformationFrame = nodeInfo;
-                            newNode.ProtocolInfo.BasicType = rawData[8];
-                            newNode.ProtocolInfo.GenericType = rawData[9];
-                            newNode.ProtocolInfo.SpecificType = rawData[10];
-                            // Add it to the node list and save it
-                            nodeList.Add(newNode);
-                            SaveNodesConfig();
-                        }
-                        else
-                        {
-                            newNode = existingNode;
-                        }
+                                    var existingNode = nodeList.Find((n) => n.Id == newNode.Id);
+                                    if (existingNode == null)
+                                    {
+                                        // Extract node information frame
+                                        int nodeInfoLength = (int)rawData[7];
+                                        byte[] nodeInfo = new byte[nodeInfoLength];
+                                        Array.Copy(rawData, 8, nodeInfo, 0, nodeInfoLength);
+                                        // Update node properties
+                                        newNode.NodeInformationFrame = nodeInfo;
+                                        newNode.ProtocolInfo.BasicType = rawData[8];
+                                        newNode.ProtocolInfo.GenericType = rawData[9];
+                                        newNode.ProtocolInfo.SpecificType = rawData[10];
+                                        // Add it to the node list and save it
+                                        nodeList.Add(newNode);
+                                        SaveNodesConfig();
+                                    }
+                                    else
+                                    {
+                                        newNode = existingNode;
+                                    }
 
                                     UpdateOperationProgress(newNode.Id, NodeQueryStatus.NodeAddStarted);
 
@@ -973,7 +973,7 @@ namespace ZWaveLib
                             }
                             catch (Exception ex)
                             {
-                                Utility.logger.Error(ex, ex.Message);
+                                Utility.logger.Error(ex.Message);
                             }
                             switch (nodeRemoveStatus)
                             {
